@@ -45,9 +45,9 @@ If you want to **save the recording session**, just give it a name (the default 
 
 ![motin capture data in IndexedDB](images/indexedDExample.png)
 
-To stop it, just press **stop logging**. Pretty simple.
+To stop recording, just press **stop logging**. Pretty simple.
 
-You can download the saved session in CSV format by pressing the "download session" button. Give it some time, there can be lot's of data.
+You can download the saved session in CSV format by pressing the "**download session**" button. Give it some time, there can be lot's of data.
 
 ### Development controls
 
