@@ -2,7 +2,7 @@
 
 ## What will you find here
 
-This is a single page HTML which includes everything what's required to initiate a camera feed, plug it into TFJS **locally*, do a motion capture analysis, and store the capture it into the browser's database. Some other files are just there for code snippets in documentation and/or images for illustration purposes.
+This is a single page HTML which includes everything what's required to initiate a camera feed, plug it into TFJS **locally**, do a motion capture analysis, and store the capture it into the browser's database. Some other files are just there for code snippets in documentation and/or images for illustration purposes.
 
 The idea comes from watching the movenet demos on Tensorflow's site, and I was wondering how I could tap into the detection. Unfortunately, the demo didn't think about that, so I figrued I could do a simple implementation to bridge the gap.
 
