@@ -2,9 +2,11 @@
 
 ## What will you find here
 
-This is a single page HTML which includes everything what's required to initiate a camera feed, plug it into TFJS, do a motion capture, and store it into the browser's database. Some other files are just there for code snippets in documentation and/or images for illustration purposes.
+This is a single page HTML which includes everything what's required to initiate a camera feed, plug it into TFJS **locally*, do a motion capture analysis, and store the capture it into the browser's database. Some other files are just there for code snippets in documentation and/or images for illustration purposes.
 
 The idea comes from watching the movenet demos on Tensorflow's site, and I was wondering how I could tap into the detection. Unfortunately, the demo didn't think about that, so I figrued I could do a simple implementation to bridge the gap.
+
+PLEASE NOTE: **everything happens locally, in your browser.**
 
 ## Status
 
@@ -39,7 +41,9 @@ The main part shows **which part of the body is recognised**. There are two colu
 
 The main reason this was developed, because I wanted to record myself playing sports, and needed to check the computer screen from far away. If I saw red, it needed some adjustments.
 
-If you want to **save the recording session**, just give it a name (the default is "defaultSession"), and press **start logging**. This will stat to save the detection in the browser's IndexedDB, with the name, you've given in the "session name" field.
+If you want to **save the recording session**, just give it a name (the default is "defaultSession"), and press **start logging**. This will stat to save the detection in the browser's IndexedDB, with the name, you've given in the "session name" field. You can see it for yourself by pressing F12 (developer console) and navigate to the Application / Storage / IndexedDB / MotionCaptureData:
+
+![motin capture data in IndexedDB](images/indexedDExample.png)
 
 To stop it, just press **stop logging**. Pretty simple.
 
