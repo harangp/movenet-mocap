@@ -25,7 +25,7 @@ The live example is available at https://harangp.github.io/movenet-mocap/
 
 Just navigate to the page (or, if you want to fiddle around, save it to your computer and start it from there - or just clone the repo from [GitHub](https://github.com/harangp/movenet-mocap)). The browser should ask for accessing your camera, you have to allow it. If there's no camera attached, you won't see anything. If everything is ok, you should see the camera's picture, and some information on the capture device:
 
-![capture device information](images/captureDeviceInfo_v2.png)
+![capture device information](images/captureDeviceInfo_v3.png)
 
 **Give it a few seconds** to load the models, and your computer to setup Tensorflow. You can follow the process in the console, you should see something like this:
 
