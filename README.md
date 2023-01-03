@@ -8,6 +8,8 @@ The idea comes from watching the movenet demos on Tensorflow's site, and I was w
 
 PLEASE NOTE: **everything happens locally, in your browser.**
 
+If you are interested in possible usages, I've written up a small article on Medium: https://harangpeter.medium.com/using-tensorflow-js-motion-capture-for-sport-performance-analysis-2784e033b86d
+
 ## Status
 
 ### Changelog
