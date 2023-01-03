@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <!-- Required meta tags -->
+        <meta charset="utf-8">
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="title" content="MoveNet-based motion capture">
+        <meta name="description" content="This is a wrapper for saving movenet real-time body recognitions into an indexed db, and be able to retreive it for further usage">
+        <meta name="keywords" content="tfjs, tensorflow, movenet, motion capture">
+        <meta name="robots" content="index, nofollow">
+        <meta name="language" content="English">
+        <meta name="author" content="Peter Harang">
+
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3" crossorigin="anonymous">
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+        <script>
+/**
+ * This is a wrapper for savin movenet real-time recognitions into an indexed db, and be able to retreive it for further usage
+ * 
+ * This was a one-day hack to allow my friend to get useful data on movements of squash / badminton players for further
+ * scientific analysis. The main idea was to capture two bodies' coordinates to DB, then be able to export it.
+ * 
+ * The table and the coloring came as that the monitor was too far away to check wether it is one or two bodies have been recognised.
+ * 
+ * Also, this just records the points on the screen as posened tretuns the dataset. If you want to go further, you'll have to translate the points
+ * to 3D. This can be nicely done since you know the height of your sampled bodies and/or have reference points. You'll have to calculate for
+ * the len's distortion as well. It's better, if your camera is standing still, a bit elevated, and you have reference lines running along the
+ * floor - hence it's good for squash/badminton/tennis/etc Those reference lengths can be used to calculate the 3D position of the body in 3D space.
+ * 
+ * CSV download mechanism was copied and then redesigned from https://stackoverflow.com/questions/54793997/export-indexeddb-object-store-to-csv
+ */
+
+console.log("loaded");
+
+const bodyColors = [ "red", "orange", "green", "blue", "white", "cyan" ];
+const videoWidth = 640;
+const videoHeight = 400;
+const SCORE_THRESHOLD = 0.3;
+const targetFps = 30;
+
+if (!window.indexedDB) {
+    console.log("Your browser doesn't support a stable version of IndexedDB. Such and such feature will not be available.");
+}
+
+let db = null;
+setupDB();
+//  modelType: poseDetection.SupportedModels.BlazePose.lite,
+const detectorConfig = {
+  modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+  enableTracking: true,
+  trackerType: poseDetection.TrackerType.BoundingBox
+};
+const detector = poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
+detector.then( (detectorValue) => setuptStream(detectorValue) );
+
+function setuptStream(detectorValue) {
+    const constraints = {
+      video: { width: { exact: videoWidth }, height: { exact: videoHeight } }
+    };
+    const video = document.getElementById("myVideo");
+    video.onloadeddata = loadedDataEventHandler(detectorValue, video);
+
+    const canvas = document.getElementById("myCanvas");
+    canvas.width = videoWidth;
+    canvas.height = videoHeight;
+
+    navigator.mediaDevices.getUserMedia(constraints).then( (stream) => {
+        video.srcObject = stream;
+        const track = stream.getVideoTracks()[0];
+        document.getElementById("media.device").innerHTML = track.label;
+        const trackSettings = track.getSettings();
+        // console.log( trackSettings );
+        try {
+            document.getElementById("media.aspectRatio").innerHTML = trackSettings.aspectRatio;
+            document.getElementById("media.colorTemperature").innerHTML = trackSettings.colorTemperature;
+            document.getElementById("media.exposureTime").innerHTML = trackSettings.exposureTime;
+            document.getElementById("media.frameRate").innerHTML = trackSettings.frameRate;
+            document.getElementById("media.saturation").innerHTML = trackSettings.saturation;
+        } catch (e) {}
+    });
+}
+
+let inDetection = false; // ez azért van, hogyha lassú a cuccos, akkor várjunk a felismeréssel. így fog az FPS lejjebbmenni.
+let inRecording = false; // ez az, hogy kell-e logolni az eredményeket
+
+function loadedDataEventHandler(detectorValue, video) {
+    console.log("creating loadedDataEventHandler")
+    return () => {
+        console.log("startDetection");
+
+        interval = window.setInterval( () => {
+          // console.log(new Date(), "interval is called");          
+          if (!inDetection) {
+              inDetection = true;
+              let start = - new Date().getTime();
+              const detection = detectorValue.estimatePoses(video);
+              detection.then( (v) => {
+                  start += new Date().getTime();
+                  inDetection = false;
+                  updateHTML( v, start, Math.floor(1000/start));
+                  if (inRecording) {
+                      const obj = { 
+                          sessionName: document.getElementById("sessionName").value, 
+                          insertTime: new Date().getTime(),
+                          data: v 
+                      };
+                      console.log("saving", obj );
+                      const tx = db.transaction(["MotionCaptureData"], "readwrite");
+                      const os = tx.objectStore("MotionCaptureData");
+                      os.add( obj );
+                  }
+                  drawDetection(v);
+              });
+          } else {
+              console.log(new Date(), "Skipped frame");
+          }
+        }, 1000 / 2 / targetFps);
+    }
+}
+
+function updateHTML( d, time, fps) {
+    document.getElementById("detectionTime").innerHTML = time;
+    document.getElementById("fps").innerHTML = fps;
+
+    if (d.length < 2) {
+        document.querySelectorAll("table tbody span").forEach( e => e.innerHTML = "&nbsp;");
+    }
+
+    d.forEach( (body, i) => {
+        if (i < 2) body.keypoints.forEach( (keyPoint, j) => {
+            try {
+                const p = "" + i + "." + j;
+                
+                document.getElementById(p).style.backgroundColor = keyPoint.score < SCORE_THRESHOLD ? "#ffc8c8" : "inherit";
+
+                document.getElementById(p + ".name").innerHTML = keyPoint.name;
+                document.getElementById(p + ".x").innerHTML = Math.floor(keyPoint.x);
+                document.getElementById(p + ".y").innerHTML = Math.floor(keyPoint.y);
+                document.getElementById(p + ".score").innerHTML = Math.floor(keyPoint.score * 100) + "%";
+            } catch (e) {
+                console.error("Error accessing innerHTML for: body", i, "keypoint", j);
+            }
+        });
+    });
+}
+
+function drawDetection( d ) {
+    // console.log(d);
+    c = document.getElementById("myCanvas");
+    ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+
+    d.forEach( (body, i) => {
+        ctx.fillStyle = bodyColors[i];
+        ctx.strokeStyle = bodyColors[i];
+        filteredBodyKeypoints = body.keypoints.filter( x => x.score > SCORE_THRESHOLD); // csak azokat kezeljük, amelyiknek valid a detekciós értéke
+
+        const bp = bodyParts( filteredBodyKeypoints );
+        // console.log(bp);
+
+        // szemvonal
+        drawLine(ctx, bp["left_eye"], bp["right_eye"]);
+
+        // test
+        drawLine(ctx, bp["right_shoulder"], bp["left_shoulder"]);
+        drawLine(ctx, bp["left_shoulder"], bp["left_hip"]);
+        drawLine(ctx, bp["left_hip"], bp["right_hip"]);
+        drawLine(ctx, bp["right_hip"], bp["right_shoulder"]);
+
+        // jobb kéz
+        drawLine(ctx, bp["right_shoulder"], bp["right_elbow"]);
+        drawLine(ctx, bp["right_elbow"], bp["right_wrist"]);
+        // bal kéz
+        drawLine(ctx, bp["left_shoulder"], bp["left_elbow"]);
+        drawLine(ctx, bp["left_elbow"], bp["left_wrist"]);
+
+        // jobb láb
+        drawLine(ctx, bp["right_hip"], bp["right_knee"]);
+        drawLine(ctx, bp["right_knee"], bp["right_ankle"]);
+        // bal láb
+        drawLine(ctx, bp["left_hip"], bp["left_knee"]);
+        drawLine(ctx, bp["left_knee"], bp["left_ankle"]);
+
+        drawLine(ctx, bp[""], bp[""]);
+
+        // felismert pontok
+        filteredBodyKeypoints.forEach( bodyPart => {
+            ctx.fillRect(Math.floor(bodyPart.x-2), Math.floor(bodyPart.y-2), 4, 4);
+        });
+    });
+}
+
+function drawLine( ctx, start, finish ) {
+    if (start && finish) {
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(finish.x, finish.y);
+        ctx.closePath();
+        ctx.stroke();
+    }
+}
+
+// újra-struktúrálás a könnyebb hozzáférésért.
+function bodyParts( parts ) {
+    const ret = [];
+    parts.forEach( x => ret[x.name] = x);
+    return ret;
+}
+
+function setupDB() {
+    console.log("Setting up db");
+    var request = indexedDB.open("MoveNetMotionCapture", 1);
+    request.onerror = function(event) {
+        console.log("Why didn't you allow my web app to use IndexedDB?!");
+    };
+    request.onsuccess = function(event) {
+        db = event.target.result;
+        console.log("db is opened");
+    };
+    request.onupgradeneeded = function(event) {
+        console.log("Database upgrade is needed");
+        db = event.target.result;
+
+        // Create an objectStore for this database
+        var objectStore = db.createObjectStore("MotionCaptureData", { keyPath: "id", autoIncrement:true });
+        objectStore.createIndex( "insertTime", "insertTime", { unique: false });
+        objectStore.createIndex( "sessionName", "sessionName", { unique: false });
+
+        console.log("db created");
+    }
+};
+
+function clear_Data() {
+    if (window.confirm("Are you sure to delete all captured data?")) {
+        console.log("Database is being deleted");
+        const tx = db.transaction(["MotionCaptureData"], "readwrite");
+        const os = tx.objectStore("MotionCaptureData");
+        os.clear().onsuccess = function(event) { 
+            window.alert("Data is successfully deleted!");
+        } 
+    }
+}
+
+function loadData() {
+    console.log("Promising to load data");
+    return new Promise( (resolve) => {
+        const filter = document.getElementById("sessionName").value;        
+        const tx = db.transaction(["MotionCaptureData"], "readwrite");
+        const os = tx.objectStore("MotionCaptureData");
+        const idx = os.index('sessionName');
+        const data = idx.getAll(IDBKeyRange.only(filter));
+        data.onsuccess = event => {
+            console.log("loaded all data from IndexedDB");
+            resolve( event.target.result );
+        };
+    });
+}
+
+function toCSV(data) {
+    var output = ["detectionId;sessionName;insertTime;bodyId;bodyScore;keyPointId;keyPointName;keyPointScore;keyPointX;keyPointY"];
+    data.forEach( d => {
+        const sessionName = d.sessionName;
+        const insertTime = d.insertTime;
+
+        d.data.forEach( (body, i) => {
+            const bodyScore = body.score;
+            body.keypoints.forEach( (kp, j) => {
+                const row = [];
+                row.push(d.id);
+                row.push(sessionName);
+                row.push(insertTime);
+                row.push(i); // body id
+                row.push(bodyScore);
+                row.push(j); // keypoint id
+                row.push(kp.name);
+                row.push(kp.score);
+                row.push(kp.x);
+                row.push(kp.y);
+
+                output.push(row.join(';'));
+            });
+        });
+
+    });
+    return output.join('\n');
+    
+  for(var object of data) {
+    var row = [];
+    for(var prop in object) {
+      row.push(to_csv_value(object[prop]));
+      row.push(',');
+    }
+    row.push('\n');
+    output.push(row.join(''));
+  }
+
+  return output.join('');
+}
+
+function createCSVFileFromString(string) {
+  var csv_mime_type = 'text/csv';
+  return new Blob([string], {type: csv_mime_type});
+}
+
+function downloadBlob(blob, filename) {
+    var anchor = document.createElement('a');
+    anchor.setAttribute('download', filename);
+    var url = URL.createObjectURL(blob);
+    anchor.setAttribute('href', url);
+    anchor.click();
+    URL.revokeObjectURL(url);
+}
+
+// And finally, to compose it all together
+async function loadAndStartDownloadingData() {
+    console.log("download button pressed");
+    var data = await loadData();
+    var csvstring = toCSV(data);
+    var blob = createCSVFileFromString(csvstring);
+    downloadBlob(blob, 'movementData.csv');
+}
+        </script>
+        <style>
+            h1 {
+                color: #425066;
+            }
+            h1 img {
+                height: 1.5rem;
+                vertical-align: text-top;
+            }
+            #myCanvas {
+                background: transparent;
+                position: absolute;
+                width: 100%;
+                height: 100%;
+                -webkit-transform: scaleX(-1);
+                transform: scaleX(-1);
+            }
+            #myVideo {
+                position: absolute;
+                width: 100%;
+                height: 100%;
+                -webkit-transform: scaleX(-1);
+                transform: scaleX(-1);
+            }
+            #boundingBox {
+                position: relative;
+                width: 636px; height: 400px;                
+            }
+			#madewith {
+				float: right;
+				font-size: 1rem;
+				margin-top: 1rem;
+			}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>MoveNet-based motion capture <span id="madewith">#madewith<img src="https://www.gstatic.com/devrel-devsite/prod/vf0a37f79faad17a4ba7ad32be120d7095e49b17f56e183e15bf9d3819216d0c9/tensorflow/images/lockup.svg"/></span></h1>
+            <div class="row">
+                <div class="col-6">
+                    <p>Detection time is <span id="detectionTime"></span> msec which translates to max fps: <span id="fps"></span></p>
+                    <p>
+                        <div class="col-auto">
+                            <label for="sessionName" class="col-form-label">Session name</label>
+                        </div>
+                        <div class="col-auto">
+                            <input type="input" id="sessionName" class="form-control" value="defaultSession">
+                        </div>
+                    </p>              
+                    <p>
+                        <button class="btn btn-primary" onclick="inRecording = !inRecording; this.innerHTML = inRecording ? 'stop logging' : 'start logging';">start logging</button>
+                        <button class="btn btn-secondary" onclick="loadAndStartDownloadingData();">download session</button>
+                        <button class="btn btn-danger" onclick="clearData();">clear data</button>
+                    </p>
+                    <div><label class="col-sm-4 col-form-label">Device:</label> <span id="media.device">&nbsp;</span></div>
+                    <div><label class="col-sm-4 col-form-label">Aspect ratio:</label> <span id="media.aspectRatio">&nbsp;</span></div>
+                    <div><label class="col-sm-4 col-form-label">Exposure time:</label> <span id="media.exposureTime">&nbsp;</span></div>
+                    <div><label class="col-sm-4 col-form-label">Framerate:</label> <span id="media.frameRate">&nbsp;</span></div>
+                    <div><label class="col-sm-4 col-form-label">Color temperature:</label> <span id="media.colorTemperature">&nbsp;</span></div>
+                    <div><label class="col-sm-4 col-form-label">Saturation:</label> <span id="media.saturation">&nbsp;</span></div>
+                </div>
+                <div class="col-6">
+                    <div id="boundingBox">
+                        <video id="myVideo" autoplay>TestVideo</video>
+                        <canvas id="myCanvas" width="640" height="400">
+                            TestCanvas
+                        </canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-6">
+                    <table class="table">
+                        <thead id="body0">
+                          <tr>
+                            <th scope="col">name</th>
+                            <th scope="col">x</th>
+                            <th scope="col">y</th>
+                            <th scope="col">score</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr id="0.0">
+                            <th scope="row"><span id="0.0.name">&nbsp;</span></th>
+                            <td><span id="0.0.x">&nbsp;</span></td>
+                            <td><span id="0.0.y">&nbsp;</span></td>
+                            <td><span id="0.0.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.1">
+                            <th scope="row"><span id="0.1.name">&nbsp;</span></th>
+                            <td><span id="0.1.x">&nbsp;</span></td>
+                            <td><span id="0.1.y">&nbsp;</span></td>
+                            <td><span id="0.1.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.2">
+                            <th scope="row"><span id="0.2.name">&nbsp;</span></th>
+                            <td><span id="0.2.x">&nbsp;</span></td>
+                            <td><span id="0.2.y">&nbsp;</span></td>
+                            <td><span id="0.2.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.3">
+                            <th scope="row"><span id="0.3.name">&nbsp;</span></th>
+                            <td><span id="0.3.x">&nbsp;</span></td>
+                            <td><span id="0.3.y">&nbsp;</span></td>
+                            <td><span id="0.3.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.4">
+                            <th scope="row"><span id="0.4.name">&nbsp;</span></th>
+                            <td><span id="0.4.x">&nbsp;</span></td>
+                            <td><span id="0.4.y">&nbsp;</span></td>
+                            <td><span id="0.4.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.5">
+                            <th scope="row"><span id="0.5.name">&nbsp;</span></th>
+                            <td><span id="0.5.x">&nbsp;</span></td>
+                            <td><span id="0.5.y">&nbsp;</span></td>
+                            <td><span id="0.5.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.6">
+                            <th scope="row"><span id="0.6.name">&nbsp;</span></th>
+                            <td><span id="0.6.x">&nbsp;</span></td>
+                            <td><span id="0.6.y">&nbsp;</span></td>
+                            <td><span id="0.6.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.7">
+                            <th scope="row"><span id="0.7.name">&nbsp;</span></th>
+                            <td><span id="0.7.x">&nbsp;</span></td>
+                            <td><span id="0.7.y">&nbsp;</span></td>
+                            <td><span id="0.7.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.8">
+                            <th scope="row"><span id="0.8.name">&nbsp;</span></th>
+                            <td><span id="0.8.x">&nbsp;</span></td>
+                            <td><span id="0.8.y">&nbsp;</span></td>
+                            <td><span id="0.8.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.9">
+                            <th scope="row"><span id="0.9.name">&nbsp;</span></th>
+                            <td><span id="0.9.x">&nbsp;</span></td>
+                            <td><span id="0.9.y">&nbsp;</span></td>
+                            <td><span id="0.9.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.10">
+                            <th scope="row"><span id="0.10.name">&nbsp;</span></th>
+                            <td><span id="0.10.x">&nbsp;</span></td>
+                            <td><span id="0.10.y">&nbsp;</span></td>
+                            <td><span id="0.10.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.11">
+                            <th scope="row"><span id="0.11.name">&nbsp;</span></th>
+                            <td><span id="0.11.x">&nbsp;</span></td>
+                            <td><span id="0.11.y">&nbsp;</span></td>
+                            <td><span id="0.11.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.12">
+                            <th scope="row"><span id="0.12.name">&nbsp;</span></th>
+                            <td><span id="0.12.x">&nbsp;</span></td>
+                            <td><span id="0.12.y">&nbsp;</span></td>
+                            <td><span id="0.12.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.13">
+                            <th scope="row"><span id="0.13.name">&nbsp;</span></th>
+                            <td><span id="0.13.x">&nbsp;</span></td>
+                            <td><span id="0.13.y">&nbsp;</span></td>
+                            <td><span id="0.13.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.14">
+                            <th scope="row"><span id="0.14.name">&nbsp;</span></th>
+                            <td><span id="0.14.x">&nbsp;</span></td>
+                            <td><span id="0.14.y">&nbsp;</span></td>
+                            <td><span id="0.14.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.15">
+                            <th scope="row"><span id="0.15.name">&nbsp;</span></th>
+                            <td><span id="0.15.x">&nbsp;</span></td>
+                            <td><span id="0.15.y">&nbsp;</span></td>
+                            <td><span id="0.15.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="0.16">
+                            <th scope="row"><span id="0.16.name">&nbsp;</span></th>
+                            <td><span id="0.16.x">&nbsp;</span></td>
+                            <td><span id="0.16.y">&nbsp;</span></td>
+                            <td><span id="0.16.score">&nbsp;</span></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                </div>
+                <div class="col-6">
+                    <table class="table">
+                        <thead id="body1">
+                          <tr>
+                            <th scope="col">name</th>
+                            <th scope="col">x</th>
+                            <th scope="col">y</th>
+                            <th scope="col">score</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr id="1.0">
+                            <th scope="row"><span id="1.0.name">&nbsp;</span></th>
+                            <td><span id="1.0.x">&nbsp;</span></td>
+                            <td><span id="1.0.y">&nbsp;</span></td>
+                            <td><span id="1.0.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.1">
+                            <th scope="row"><span id="1.1.name">&nbsp;</span></th>
+                            <td><span id="1.1.x">&nbsp;</span></td>
+                            <td><span id="1.1.y">&nbsp;</span></td>
+                            <td><span id="1.1.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.2">
+                            <th scope="row"><span id="1.2.name">&nbsp;</span></th>
+                            <td><span id="1.2.x">&nbsp;</span></td>
+                            <td><span id="1.2.y">&nbsp;</span></td>
+                            <td><span id="1.2.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.3">
+                            <th scope="row"><span id="1.3.name">&nbsp;</span></th>
+                            <td><span id="1.3.x">&nbsp;</span></td>
+                            <td><span id="1.3.y">&nbsp;</span></td>
+                            <td><span id="1.3.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.4">
+                            <th scope="row"><span id="1.4.name">&nbsp;</span></th>
+                            <td><span id="1.4.x">&nbsp;</span></td>
+                            <td><span id="1.4.y">&nbsp;</span></td>
+                            <td><span id="1.4.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.5">
+                            <th scope="row"><span id="1.5.name">&nbsp;</span></th>
+                            <td><span id="1.5.x">&nbsp;</span></td>
+                            <td><span id="1.5.y">&nbsp;</span></td>
+                            <td><span id="1.5.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.6">
+                            <th scope="row"><span id="1.6.name">&nbsp;</span></th>
+                            <td><span id="1.6.x">&nbsp;</span></td>
+                            <td><span id="1.6.y">&nbsp;</span></td>
+                            <td><span id="1.6.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.7">
+                            <th scope="row"><span id="1.7.name">&nbsp;</span></th>
+                            <td><span id="1.7.x">&nbsp;</span></td>
+                            <td><span id="1.7.y">&nbsp;</span></td>
+                            <td><span id="1.7.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.8">
+                            <th scope="row"><span id="1.8.name">&nbsp;</span></th>
+                            <td><span id="1.8.x">&nbsp;</span></td>
+                            <td><span id="1.8.y">&nbsp;</span></td>
+                            <td><span id="1.8.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.9">
+                            <th scope="row"><span id="1.9.name">&nbsp;</span></th>
+                            <td><span id="1.9.x">&nbsp;</span></td>
+                            <td><span id="1.9.y">&nbsp;</span></td>
+                            <td><span id="1.9.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.10">
+                            <th scope="row"><span id="1.10.name">&nbsp;</span></th>
+                            <td><span id="1.10.x">&nbsp;</span></td>
+                            <td><span id="1.10.y">&nbsp;</span></td>
+                            <td><span id="1.10.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.11">
+                            <th scope="row"><span id="1.11.name">&nbsp;</span></th>
+                            <td><span id="1.11.x">&nbsp;</span></td>
+                            <td><span id="1.11.y">&nbsp;</span></td>
+                            <td><span id="1.11.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.12">
+                            <th scope="row"><span id="1.12.name">&nbsp;</span></th>
+                            <td><span id="1.12.x">&nbsp;</span></td>
+                            <td><span id="1.12.y">&nbsp;</span></td>
+                            <td><span id="1.12.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.13">
+                            <th scope="row"><span id="1.13.name">&nbsp;</span></th>
+                            <td><span id="1.13.x">&nbsp;</span></td>
+                            <td><span id="1.13.y">&nbsp;</span></td>
+                            <td><span id="1.13.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.14">
+                            <th scope="row"><span id="1.14.name">&nbsp;</span></th>
+                            <td><span id="1.14.x">&nbsp;</span></td>
+                            <td><span id="1.14.y">&nbsp;</span></td>
+                            <td><span id="1.14.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.15">
+                            <th scope="row"><span id="1.15.name">&nbsp;</span></th>
+                            <td><span id="1.15.x">&nbsp;</span></td>
+                            <td><span id="1.15.y">&nbsp;</span></td>
+                            <td><span id="1.15.score">&nbsp;</span></td>
+                          </tr>
+                          <tr id="1.16">
+                            <th scope="row"><span id="1.16.name">&nbsp;</span></th>
+                            <td><span id="1.16.x">&nbsp;</span></td>
+                            <td><span id="1.16.y">&nbsp;</span></td>
+                            <td><span id="1.16.score">&nbsp;</span></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>
