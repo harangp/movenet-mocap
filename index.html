@@ -84,8 +84,8 @@ function setuptStream(detectorValue) {
     });
 }
 
-let inDetection = false; // ez azért van, hogyha lassú a cuccos, akkor várjunk a felismeréssel. így fog az FPS lejjebbmenni.
-let inRecording = false; // ez az, hogy kell-e logolni az eredményeket
+let inDetection = false; // ez azért van, hogyha lassú a cuccos, akkor várjunk a felismeréssel. így fog az FPS lejjebbmenni. - if the machine is slow, we'll wait with the recognition. FPS will go down
+let inRecording = false; // ez az, hogy kell-e logolni az eredményeket - this notes wether we need to log the results or not
 
 function loadedDataEventHandler(detectorValue, video) {
     console.log("creating loadedDataEventHandler")
@@ -162,32 +162,32 @@ function drawDetection( d ) {
         const bp = bodyParts( filteredBodyKeypoints );
         // console.log(bp);
 
-        // szemvonal
+        // szemvonal - eyeline
         drawLine(ctx, bp["left_eye"], bp["right_eye"]);
 
-        // test
+        // test - body
         drawLine(ctx, bp["right_shoulder"], bp["left_shoulder"]);
         drawLine(ctx, bp["left_shoulder"], bp["left_hip"]);
         drawLine(ctx, bp["left_hip"], bp["right_hip"]);
         drawLine(ctx, bp["right_hip"], bp["right_shoulder"]);
 
-        // jobb kéz
+        // jobb kéz - right hand
         drawLine(ctx, bp["right_shoulder"], bp["right_elbow"]);
         drawLine(ctx, bp["right_elbow"], bp["right_wrist"]);
-        // bal kéz
+        // bal kéz - left hand
         drawLine(ctx, bp["left_shoulder"], bp["left_elbow"]);
         drawLine(ctx, bp["left_elbow"], bp["left_wrist"]);
 
-        // jobb láb
+        // jobb láb - right leg
         drawLine(ctx, bp["right_hip"], bp["right_knee"]);
         drawLine(ctx, bp["right_knee"], bp["right_ankle"]);
-        // bal láb
+        // bal láb - left leg
         drawLine(ctx, bp["left_hip"], bp["left_knee"]);
         drawLine(ctx, bp["left_knee"], bp["left_ankle"]);
 
         drawLine(ctx, bp[""], bp[""]);
 
-        // felismert pontok
+        // felismert pontok - recognised points
         filteredBodyKeypoints.forEach( bodyPart => {
             ctx.fillRect(Math.floor(bodyPart.x-2), Math.floor(bodyPart.y-2), 4, 4);
         });
@@ -204,7 +204,7 @@ function drawLine( ctx, start, finish ) {
     }
 }
 
-// újra-struktúrálás a könnyebb hozzáférésért.
+// újra-struktúrálás a könnyebb hozzáférésért. - new structures for easier access
 function bodyParts( parts ) {
     const ret = [];
     parts.forEach( x => ret[x.name] = x);
@@ -360,7 +360,7 @@ async function loadAndStartDownloadingData() {
     </head>
     <body>
         <div class="container">
-            <h1>MoveNet-based motion capture <span id="madewith">#madewith<img src="https://www.gstatic.com/devrel-devsite/prod/vf0a37f79faad17a4ba7ad32be120d7095e49b17f56e183e15bf9d3819216d0c9/tensorflow/images/lockup.svg"/></span></h1>
+            <h1>MoveNet-based motion capture <span id="madewith">#madewith<img src="images/tflogo.svg"/></span></h1>
             <div class="row">
                 <div class="col-6">
                     <p>Detection time is <span id="detectionTime"></span> msec which translates to max fps: <span id="fps"></span></p>
